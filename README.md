@@ -16,14 +16,6 @@ Input Claim
 ```
 
 
-```bash
-git clone https://github.com/mbzuai-nlp/fire.git
-cd fire
-pip install -r requirements.txt
-
-# Run FIRE with GPT-4o-mini
-python run_fire.py --model gpt-4o-mini --dataset factcheck_bench
-```
 
 ```bash
 python run_fire_rag.py --benchmark hover --build_ratio 0.8 --build_only      
