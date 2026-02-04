@@ -25,7 +25,6 @@ from common.shared_config import openai_api_key, serper_api_key, anthropic_api_k
 from eval.fire.verify_atomic_claim import (
     FinalAnswer,
     GoogleSearchResult,
-    call_search,
     final_answer_or_next_search,
     must_get_final_answer,
 )
@@ -131,8 +130,8 @@ class VectorRAG:
                 self.embeddings = self.encoder.encode(texts, convert_to_tensor=True).to(device)
 
 
-def fetch_full_content(url: str, max_chars: int = 5000) -> str:
-    """Fetch full text content from a URL."""
+def fetch_full_content(url: str, max_words: int = 2000) -> str:
+    """Fetch full text content from a URL, limited by word count."""
     try:
         response = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -142,9 +141,89 @@ def fetch_full_content(url: str, max_chars: int = 5000) -> str:
             tag.decompose()
 
         text = soup.get_text(separator=' ', strip=True)
-        return text[:max_chars]
+
+        # Limit by word count
+        words = text.split()
+        if len(words) > max_words:
+            text = ' '.join(words[:max_words])
+
+        return text
     except Exception:
         return ""
+
+
+def chunk_text(text: str, chunk_size: int = 400, overlap: int = 50) -> list[str]:
+    """
+    Split text into overlapping chunks by word count.
+
+    Args:
+        text: The text to chunk
+        chunk_size: Number of words per chunk
+        overlap: Number of overlapping words between chunks
+
+    Returns:
+        List of text chunks
+    """
+    words = text.split()
+
+    if len(words) <= chunk_size:
+        return [text] if text.strip() else []
+
+    chunks = []
+    start = 0
+
+    while start < len(words):
+        end = start + chunk_size
+        chunk = ' '.join(words[start:end])
+        chunks.append(chunk)
+
+        # Move start forward by (chunk_size - overlap)
+        start += chunk_size - overlap
+
+        # Avoid tiny final chunks
+        if start < len(words) and len(words) - start < overlap:
+            break
+
+    return chunks
+
+
+def call_search_with_urls(
+        search_query: str,
+        num_results: int = 3,
+) -> list[dict]:
+    """
+    Call Serper API and return results with URLs.
+
+    Returns:
+        List of dicts with 'url', 'title', 'snippet' keys
+    """
+    from eval.fire.query_serper import SerperAPI, _SERPER_URL
+    import requests as req
+
+    headers = {
+        'X-API-KEY': serper_api_key,
+        'Content-Type': 'application/json',
+    }
+    params = {'q': search_query, 'num': num_results}
+
+    try:
+        response = req.post(f'{_SERPER_URL}/search', headers=headers, params=params)
+        response.raise_for_status()
+        results = response.json()
+    except Exception:
+        return []
+
+    parsed_results = []
+
+    # Parse organic results
+    for item in results.get('organic', [])[:num_results]:
+        parsed_results.append({
+            'url': item.get('link', ''),
+            'title': item.get('title', ''),
+            'snippet': item.get('snippet', ''),
+        })
+
+    return parsed_results
 
 
 def generate_search_queries(claim: str, rater: Model, num_queries: int = 3) -> list[str]:
@@ -172,36 +251,89 @@ Output format: ["query1", "query2", "query3"]
     return [claim]
 
 
-def collect_evidence_for_rag(claim: str, rater: Model, data_idx: int, num_queries: int = 3) -> list[dict]:
+def collect_evidence_for_rag(
+        claim: str,
+        rater: Model,
+        data_idx: int,
+        num_queries: int = 3,
+        num_urls_per_query: int = 3,
+        max_words: int = 2000,
+        chunk_size: int = 400,
+        chunk_overlap: int = 50,
+) -> list[dict]:
     """
     Collect evidence for RAG database (training phase only).
-    No verification - just generate queries and retrieve evidence.
+    Fetches full web content and chunks it for better retrieval.
 
     Args:
         claim: The claim to collect evidence for
         rater: The LLM model
         data_idx: Index of this sample in the shuffled dataset (for visibility control)
         num_queries: Number of search queries to generate
+        num_urls_per_query: Number of URLs to fetch per query
+        max_words: Maximum words to extract from each webpage
+        chunk_size: Number of words per chunk
+        chunk_overlap: Number of overlapping words between chunks
     """
     # Step 1: Generate search queries
     queries = generate_search_queries(claim, rater, num_queries)
 
     evidence_docs = []
+    seen_urls = set()
+
     for query in queries:
-        # Step 2: Execute search
+        # Step 2: Get search results with URLs
         try:
-            snippet = call_search(query)
+            search_results = call_search_with_urls(query, num_results=num_urls_per_query)
         except Exception:
             continue
 
-        if snippet and snippet != "No good Google Search result was found":
-            evidence_docs.append({
-                'text': f"Claim: {claim}\nQuery: {query}\nEvidence: {snippet}",
-                'claim': claim,
-                'query': query,
-                'snippet': snippet,
-                'data_idx': data_idx,  # Tag with position for visibility control
-            })
+        for result in search_results:
+            url = result.get('url', '')
+            snippet = result.get('snippet', '')
+            title = result.get('title', '')
+
+            # Skip duplicate URLs
+            if url in seen_urls or not url:
+                continue
+            seen_urls.add(url)
+
+            # Step 3: Fetch full web content
+            full_content = fetch_full_content(url, max_words=max_words)
+
+            if not full_content or len(full_content.split()) < 20:
+                # Fall back to snippet if content fetch fails
+                if snippet:
+                    evidence_docs.append({
+                        'text': f"Claim: {claim}\nQuery: {query}\nEvidence: {snippet}",
+                        'claim': claim,
+                        'query': query,
+                        'snippet': snippet,
+                        'url': url,
+                        'title': title,
+                        'chunk_idx': 0,
+                        'total_chunks': 1,
+                        'source': 'snippet',
+                        'data_idx': data_idx,
+                    })
+                continue
+
+            # Step 4: Chunk the content
+            chunks = chunk_text(full_content, chunk_size=chunk_size, overlap=chunk_overlap)
+
+            for chunk_idx, chunk in enumerate(chunks):
+                evidence_docs.append({
+                    'text': f"Claim: {claim}\nQuery: {query}\nEvidence: {chunk}",
+                    'claim': claim,
+                    'query': query,
+                    'snippet': chunk,  # Store chunk as snippet for retrieval
+                    'url': url,
+                    'title': title,
+                    'chunk_idx': chunk_idx,
+                    'total_chunks': len(chunks),
+                    'source': 'full_content',
+                    'data_idx': data_idx,
+                })
 
     return evidence_docs
 
@@ -215,7 +347,7 @@ def verify_claim_with_rag(
         max_data_idx: Optional[int] = None,
         max_steps: int = fire_config.max_steps,
         max_retries: int = fire_config.max_retries,
-) -> tuple[FinalAnswer | None, dict, dict | None]:
+) -> tuple[FinalAnswer | None, dict, dict | None, dict]:
     """
     Verify a claim using RAG first, then fall back to web search if needed.
 
@@ -232,8 +364,15 @@ def verify_claim_with_rag(
     search_results = []
     total_usage = {'input_tokens': 0, 'output_tokens': 0}
 
+    # RAG context tracking
+    rag_context = {
+        'retrieved_count': 0,  # How many records passed the threshold
+        'concluded_by_rag': False,  # Is the question concluded on RAG results?
+    }
+
     # Step 1: Query RAG database first (with visibility control)
     rag_results = rag.search(claim, top_k=rag_top_k, threshold=rag_threshold, max_data_idx=max_data_idx)
+    rag_context['retrieved_count'] = len(rag_results)
 
     if rag_results:
         # Use RAG evidence as initial knowledge
@@ -254,11 +393,12 @@ def verify_claim_with_rag(
 
         if isinstance(answer_or_next_search, FinalAnswer):
             # RAG was sufficient
+            rag_context['concluded_by_rag'] = True
             search_dicts = {
                 'google_searches': [dataclasses.asdict(s) for s in search_results],
                 'source': 'rag'
             }
-            return answer_or_next_search, search_dicts, total_usage
+            return answer_or_next_search, search_dicts, total_usage, rag_context
 
     # Step 3: Fall back to web search if RAG insufficient
     stop_search = False
@@ -289,7 +429,7 @@ def verify_claim_with_rag(
                 'google_searches': [dataclasses.asdict(s) for s in search_results],
                 'source': 'web'
             }
-            return answer_or_next_search, search_dicts, total_usage
+            return answer_or_next_search, search_dicts, total_usage, rag_context
 
     # Must get final answer
     final_answer, num_tries = None, 0
@@ -304,7 +444,7 @@ def verify_claim_with_rag(
         'google_searches': [dataclasses.asdict(s) for s in search_results],
         'source': 'mixed'
     }
-    return final_answer, search_dicts, total_usage
+    return final_answer, search_dicts, total_usage, rag_context
 
 
 def main():
@@ -312,9 +452,13 @@ def main():
     parser.add_argument('--benchmark', type=str, required=True, help='Benchmark dataset name')
     parser.add_argument('--build_ratio', type=float, default=0.8, help='Max ratio for building RAG (build once)')
     parser.add_argument('--train_ratio', type=float, default=0.3, help='Ratio of visible data for this evaluation')
-    parser.add_argument('--rag_threshold', type=float, default=0.6, help='Similarity threshold for RAG retrieval')
+    parser.add_argument('--rag_threshold', type=float, default=0.4, help='Similarity threshold for RAG retrieval')
     parser.add_argument('--rag_top_k', type=int, default=5, help='Top-k results from RAG')
     parser.add_argument('--num_queries', type=int, default=3, help='Number of search queries per claim in training')
+    parser.add_argument('--num_urls', type=int, default=3, help='Number of URLs to fetch per search query')
+    parser.add_argument('--max_words', type=int, default=2000, help='Maximum words to extract from each webpage')
+    parser.add_argument('--chunk_size', type=int, default=400, help='Number of words per chunk')
+    parser.add_argument('--chunk_overlap', type=int, default=50, help='Overlapping words between chunks')
     parser.add_argument('--build_only', action='store_true', help='Only build RAG database, skip evaluation')
     parser.add_argument('--eval_only', action='store_true', help='Only evaluate, load existing RAG')
     args = parser.parse_args()
@@ -358,10 +502,20 @@ def main():
             for idx, item in enumerate(tqdm.tqdm(build_data, desc="Collecting evidence")):
                 claim = item['claim']
                 # Tag each doc with its data_idx for visibility control
-                evidence_docs = collect_evidence_for_rag(claim, rater, data_idx=idx, num_queries=args.num_queries)
+                evidence_docs = collect_evidence_for_rag(
+                    claim, rater, data_idx=idx,
+                    num_queries=args.num_queries,
+                    num_urls_per_query=args.num_urls,
+                    max_words=args.max_words,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
+                )
                 all_evidence.extend(evidence_docs)
 
-            print(f"Collected {len(all_evidence)} evidence documents")
+            # Count chunks vs snippets
+            full_content_docs = sum(1 for d in all_evidence if d.get('source') == 'full_content')
+            snippet_docs = sum(1 for d in all_evidence if d.get('source') == 'snippet')
+            print(f"Collected {len(all_evidence)} evidence documents ({full_content_docs} chunks from full content, {snippet_docs} snippets)")
             rag.add_documents(all_evidence)
             rag.total_samples = total_samples
             rag.save(rag_path)
@@ -416,7 +570,7 @@ def main():
                 if claim in processed_claims:
                     continue
 
-                result, searches, usage = verify_claim_with_rag(
+                result, searches, usage, rag_context = verify_claim_with_rag(
                     claim, rater, rag,
                     rag_threshold=args.rag_threshold,
                     rag_top_k=args.rag_top_k,
@@ -438,7 +592,8 @@ def main():
                     'claim': claim,
                     'label': label,
                     'result': dataclasses.asdict(result),
-                    'searches': searches
+                    'searches': searches,
+                    'rag_context': rag_context
                 }) + '\n')
 
         print(f"\n=== Results (train_ratio={args.train_ratio}) ===")

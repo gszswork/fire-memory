@@ -5,3 +5,5 @@ __init__.py
 common/shared_config.py
 .claude/settings.local.json
 /.claude
+/rag_db
+common/shared_config.py
