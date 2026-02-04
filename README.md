@@ -47,5 +47,7 @@ the web knowledge overwelms the rag_db knowledge.
 
 
 ### Update notes
+
 Feb. 1: Implemented rag_db memory for retrieval
+
 Fed. 3: Serper only return a snippet for website, ADD web crawling to get whole web page's content.

@@ -1,4 +1,0 @@
-python run_fire_rag.py --benchmark hover --train_ratio 0.2 --eval_only                                                                                                                                                          
-python run_fire_rag.py --benchmark hover --train_ratio 0.4 --eval_only                                                                                                                                                          
-python run_fire_rag.py --benchmark hover --train_ratio 0.6 --eval_only                                                                                                                                                          
-python run_fire_rag.py --benchmark hover --train_ratio 0.8 --eval_only 
