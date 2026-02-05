@@ -45,19 +45,7 @@ When we test, we still allow web retrieval for the test samples. This is a weird
 We should just only use the knowlegde built on training set, and do not allow retrieval for test samples. Otherwise the test samples always get the latest web info and 
 the web knowledge overwelms the rag_db knowledge. 
 
-### No test-time web-retrieval experiment
-
-```bash
-# To construct the rag_db
-bash sh_construct_all.sh
-
-# To test testing samples
-bash sh_test_all.sh
-```
-
 
 ### Update notes
-
 Feb. 1: Implemented rag_db memory for retrieval
-
 Fed. 3: Serper only return a snippet for website, ADD web crawling to get whole web page's content.

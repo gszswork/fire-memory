@@ -227,7 +227,7 @@ def main():
 
     for model in models:
         print(f'Running model: {model}')
-        rater = Model(model)
+        rater = Model(model, temperature=0)
         model_name = model.split(':')[-1].split('/')[-1]
 
         # Load dataset
@@ -298,7 +298,7 @@ def main():
                     claim, rater, rag,
                     rag_threshold=args.rag_threshold,
                     rag_top_k=args.rag_top_k,
-                    max_data_idx=visible_idx if visible_idx > 0 else None,
+                    max_data_idx=visible_idx,  # 0 means no docs visible
                 )
 
                 if usage:

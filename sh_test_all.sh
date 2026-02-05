@@ -10,7 +10,8 @@
 #   0.8 - 80% of training evidence visible (max available)
 
 # Datasets
-DATASETS=("averitec" "aggrefact_cnn" "pubhealth" "summeval" "LIAR-New")
+# DATASETS=("averitec" "aggrefact_cnn" "pubhealth" "summeval" "LIAR-New")
+DATASETS=("averitec")
 
 # Ratios to test
 RATIOS=(0 0.2 0.4 0.6 0.8)

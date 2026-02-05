@@ -1,0 +1,15 @@
+{
+  "benchmark": "averitec",
+  "model": "gpt-4o-mini",
+  "train_ratio": 0.6,
+  "build_ratio": 0.8,
+  "total_test_samples": 100,
+  "successful": 100,
+  "failed": 0,
+  "rag_concluded": 60,
+  "total_usage": {
+    "input_tokens": 258653,
+    "output_tokens": 37654
+  },
+  "web_retrieval": false
+}
