@@ -172,7 +172,7 @@ def verify_claim_rag_only(
 
     # Try to get answer with RAG evidence only (no web fallback)
     if search_results:
-        answer_or_next_search, usage = final_answer_or_next_search(
+        answer_or_next_search, usage, _ = final_answer_or_next_search(
             claim, search_results, rater, diverse_prompt=False, tolerance=fire_config.max_tolerance
         )
         if usage:

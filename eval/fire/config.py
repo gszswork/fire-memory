@@ -17,8 +17,10 @@ num_searches = 3
 # max_retries: int = maximum number of retries when fact checking fails.
 # max_tolerance: int = maximum number of repetitive searches when fact checking.
 # diverse_prompt: bool = whether to use diverse prompts for fact checking.
+# use_memory: bool = whether to carry forward prior reasoning (chain-of-thought) across iterations.
 ################################################################################
-max_steps = 5
+max_steps = 3
 max_retries = 10
 max_tolerance = 2
 diverse_prompt = False
+use_memory = True

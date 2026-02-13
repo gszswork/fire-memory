@@ -9,7 +9,7 @@
   "rag_concluded": 0,
   "total_usage": {
     "input_tokens": 17532,
-    "output_tokens": 31276
+    "output_tokens": 30990
   },
   "web_retrieval": false
 }

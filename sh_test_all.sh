@@ -14,7 +14,7 @@
 DATASETS=("averitec")
 
 # Ratios to test
-RATIOS=(0 0.2 0.4 0.6 0.8)
+RATIOS=(0)
 
 # Run tests
 for dataset in "${DATASETS[@]}"; do

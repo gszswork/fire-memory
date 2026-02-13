@@ -384,7 +384,7 @@ def verify_claim_with_rag(
 
     # Step 2: Try to get answer with RAG evidence
     if search_results:
-        answer_or_next_search, usage = final_answer_or_next_search(
+        answer_or_next_search, usage, _ = final_answer_or_next_search(
             claim, search_results, rater, diverse_prompt=False, tolerance=fire_config.max_tolerance
         )
         if usage:
@@ -405,7 +405,7 @@ def verify_claim_with_rag(
     for _ in range(max_steps):
         answer_or_next_search, num_tries = None, 0
         while not answer_or_next_search and num_tries <= max_retries:
-            answer_or_next_search, usage = final_answer_or_next_search(
+            answer_or_next_search, usage, _ = final_answer_or_next_search(
                 claim, search_results, rater,
                 diverse_prompt=fire_config.diverse_prompt,
                 tolerance=fire_config.max_tolerance
@@ -476,7 +476,7 @@ def main():
 
     for model in models:
         print(f'Running model: {model}')
-        rater = Model(model)
+        rater = Model(model, temperature=0)
         model_name = model.split(':')[-1].split('/')[-1]
 
         # Load dataset
